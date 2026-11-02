@@ -23,7 +23,9 @@ export default function OverviewPage() {
     newsEvents,
     upcomingEvents,
     setActiveTab,
-    applyGlobalFilters
+    applyGlobalFilters,
+    filterLocation,
+    setFilterLocation
   } = useTrendRadar();
 
   const filterItems = (items) => applyGlobalFilters(items);
@@ -142,15 +144,15 @@ export default function OverviewPage() {
           ].map(tab => (
             <button
               key={tab.id}
-              onClick={() => setLocationFilter(tab.id)}
+              onClick={() => setFilterLocation(tab.id)}
               style={{
                 padding: '0.3rem 0.75rem',
                 borderRadius: 'var(--radius-full)',
                 fontSize: '0.75rem',
                 fontWeight: 600,
-                background: locationFilter === tab.id ? 'var(--cm-purple)' : 'var(--bg-subtle)',
-                color: locationFilter === tab.id ? '#fff' : 'var(--text-secondary)',
-                border: `1px solid ${locationFilter === tab.id ? 'var(--cm-purple)' : 'var(--border-light)'}`,
+                background: filterLocation === tab.id ? 'var(--cm-purple)' : 'var(--bg-subtle)',
+                color: filterLocation === tab.id ? '#fff' : 'var(--text-secondary)',
+                border: `1px solid ${filterLocation === tab.id ? 'var(--cm-purple)' : 'var(--border-light)'}`,
                 transition: 'all 0.15s ease'
               }}
             >
