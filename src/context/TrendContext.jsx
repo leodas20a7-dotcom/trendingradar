@@ -13,6 +13,7 @@ import { getFestivalsForDate, getUpcomingFestivals } from '../services/festivalS
 import { fetchOnThisDayHistory } from '../services/historyService.js';
 import { fetchRecordsAndAchievements } from '../services/sportsService.js';
 import { sourceStatusTracker } from '../services/sourceStatusTracker.js';
+import { TAMIL_LEGENDS_DATABASE, formatTamilLegendEvent } from '../services/tamilNaduLegendsService.js';
 
 const TrendContext = createContext(null);
 
@@ -20,10 +21,10 @@ export function TrendProvider({ children }) {
   // Navigation & Filter State
   const [activeTab, setActiveTab] = useState('overview');
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterLocation, setFilterLocation] = useState('all'); // 'all', 'tamilnadu', 'india', 'worldwide'
-  const [filterVerification, setFilterVerification] = useState('all'); // 'all', 'verified', 'reported', 'unverified'
+  const [filterLocation, setFilterLocation] = useState('all');
+  const [filterVerification, setFilterVerification] = useState('all');
   const [filterCategory, setFilterCategory] = useState('all');
-  const [filterPostedStatus, setFilterPostedStatus] = useState('all'); // 'all', 'unposted', 'posted'
+  const [filterPostedStatus, setFilterPostedStatus] = useState('all');
 
   // Data Stores
   const [newsEvents, setNewsEvents] = useState([]);
@@ -32,6 +33,7 @@ export function TrendProvider({ children }) {
   const [historyEvents, setHistoryEvents] = useState([]);
   const [recordsEvents, setRecordsEvents] = useState([]);
   const [upcomingEvents, setUpcomingEvents] = useState([]);
+  const [tamilLegends, setTamilLegends] = useState([]);
 
   // Tracker State (from LocalStorage)
   const [postedMap, setPostedMap] = useState(() => postedStore.getAll());
@@ -62,9 +64,12 @@ export function TrendProvider({ children }) {
     const nowParts = getISTDateParts();
 
     try {
-      // 1. Fetch synchronous calendar items first
+      // 1. Instant sync items: Festivals & Tamil Nadu Legends
       const todayFestivals = getFestivalsForDate(new Date());
       setFestivalEvents(todayFestivals);
+
+      const allTamilLegendsFormatted = TAMIL_LEGENDS_DATABASE.map(l => formatTamilLegendEvent(l));
+      setTamilLegends(allTamilLegendsFormatted);
 
       // 2. Fetch upcoming occasions (festivals + curated birthdays)
       const upcomingFests = getUpcomingFestivals(30, new Date());
@@ -76,25 +81,18 @@ export function TrendProvider({ children }) {
       });
       setUpcomingEvents(combinedUpcoming);
 
-      // 3. Concurrently fetch asynchronous providers
-      const [fetchedNews, fetchedBirthdays, fetchedHistory] = await Promise.all([
+      // 3. Fetch asynchronous providers with guaranteed resilient fallbacks
+      const [fetchedNews, fetchedBirthdays, fetchedHistory, fetchedRecords] = await Promise.all([
         fetchTrendingNews().catch(() => []),
         fetchCelebrityBirthdays(new Date()).catch(() => []),
-        fetchOnThisDayHistory(new Date()).catch(() => [])
+        fetchOnThisDayHistory(new Date()).catch(() => []),
+        fetchRecordsAndAchievements().catch(() => [])
       ]);
 
       setNewsEvents(fetchedNews);
       setBirthdayEvents(fetchedBirthdays);
       setHistoryEvents(fetchedHistory);
-
-      // 4. Derive records & achievements
-      const allEventsPool = [...fetchedNews, ...fetchedHistory];
-      const records = await fetchRecordsAndAchievements(allEventsPool);
-      setRecordsEvents(records);
-
-      // 5. Update history store with discovered signatures to prevent duplicates
-      const newSignatures = allEventsPool.map(e => e.id);
-      historyStore.recordSeen(newSignatures);
+      setRecordsEvents(fetchedRecords);
 
       setLastRefreshedAt(nowParts.formattedTime);
       setSources(sourceStatusTracker.getAll());
@@ -110,23 +108,6 @@ export function TrendProvider({ children }) {
   useEffect(() => {
     loadAllData(false);
   }, [loadAllData]);
-
-  // Automated Background Refresh based on settings
-  useEffect(() => {
-    const intervalMinutes = userSettings.newsRefreshIntervalMinutes || 15;
-    const intervalMs = intervalMinutes * 60 * 1000;
-
-    const refreshTimer = setInterval(() => {
-      // Background silent refresh for news & sports
-      fetchTrendingNews().then(news => {
-        setNewsEvents(news);
-        setSources(sourceStatusTracker.getAll());
-        setOverallStatus(sourceStatusTracker.getOverallStatus());
-      }).catch(err => console.warn('Background news refresh error:', err));
-    }, intervalMs);
-
-    return () => clearInterval(refreshTimer);
-  }, [userSettings.newsRefreshIntervalMinutes]);
 
   // Trackers Action Handlers
   const handleMarkAsPosted = useCallback((id, metadata) => {
@@ -160,73 +141,23 @@ export function TrendProvider({ children }) {
     setUserSettings(settingsStore.get());
   }, []);
 
-  // Universal filter utility function
-  const applyGlobalFilters = useCallback((items = []) => {
-    if (!Array.isArray(items)) return [];
-
-    return items.filter(item => {
-      if (!item) return false;
-
-      // Ignore dismissed items
-      if (dismissedMap[item.id]) return false;
-
-      // Location Filter
-      if (filterLocation !== 'all' && item.location !== filterLocation) {
-        return false;
-      }
-
-      // Verification Filter
-      if (filterVerification !== 'all' && item.verificationStatus !== filterVerification) {
-        return false;
-      }
-
-      // Category Filter
-      if (filterCategory !== 'all' && item.category !== filterCategory) {
-        return false;
-      }
-
-      // Posted Status Filter
-      if (filterPostedStatus === 'posted' && !postedMap[item.id]) {
-        return false;
-      }
-      if (filterPostedStatus === 'unposted' && postedMap[item.id]) {
-        return false;
-      }
-
-      // Search Query
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase().trim();
-        const searchCorpus = (
-          (item.title || '') + ' ' +
-          (item.summary || '') + ' ' +
-          (item.personOrTeam || '') + ' ' +
-          (item.country || '') + ' ' +
-          (item.category || '')
-        ).toLowerCase();
-
-        if (!searchCorpus.includes(q)) {
-          return false;
-        }
-      }
-
-      return true;
-    });
-  }, [filterLocation, filterVerification, filterCategory, filterPostedStatus, searchQuery, dismissedMap, postedMap]);
+  // Aggregate all unique non-dismissed events
   const allEvents = useMemo(() => {
     return [
-      ...newsEvents,
+      ...recordsEvents,
       ...birthdayEvents,
       ...festivalEvents,
+      ...newsEvents,
       ...historyEvents
     ];
-  }, [newsEvents, birthdayEvents, festivalEvents, historyEvents]);
+  }, [recordsEvents, birthdayEvents, festivalEvents, newsEvents, historyEvents]);
 
   // Summary Metrics
   const metrics = useMemo(() => {
     const activeEvents = allEvents.filter(e => !dismissedMap[e.id]);
     const verifiedCount = activeEvents.filter(e => e.verificationStatus === 'verified').length;
-    const postedCount = Object.keys(postedMap).length;
-    const savedCount = Object.keys(savedMap).length;
+    const postedCount = Object.keys(postedMap || {}).length;
+    const savedCount = Object.keys(savedMap || {}).length;
 
     return {
       totalDiscovered: activeEvents.length,
@@ -234,10 +165,11 @@ export function TrendProvider({ children }) {
       reportedCount: activeEvents.filter(e => e.verificationStatus === 'reported').length,
       unverifiedCount: activeEvents.filter(e => e.verificationStatus === 'unverified').length,
       upcomingCount: upcomingEvents.length,
+      tamilCount: tamilLegends.length,
       postedCount,
       savedCount
     };
-  }, [allEvents, dismissedMap, postedMap, savedMap, upcomingEvents]);
+  }, [allEvents, dismissedMap, postedMap, savedMap, upcomingEvents, tamilLegends]);
 
   const value = {
     activeTab,
@@ -261,11 +193,12 @@ export function TrendProvider({ children }) {
     historyEvents,
     recordsEvents,
     upcomingEvents,
+    tamilLegends,
 
     // State maps
-    postedMap,
-    savedMap,
-    dismissedMap,
+    postedMap: postedMap || {},
+    savedMap: savedMap || {},
+    dismissedMap: dismissedMap || {},
     userSettings,
 
     // Actions
@@ -276,7 +209,6 @@ export function TrendProvider({ children }) {
     undoDismiss: handleUndoDismiss,
     updateSettings: handleUpdateSettings,
     refreshAll: () => loadAllData(true),
-    applyGlobalFilters,
 
     // Status & Indicators
     sources,
@@ -301,4 +233,3 @@ export function useTrendRadar() {
   }
   return context;
 }
-

@@ -1,19 +1,20 @@
 /**
- * Resilient API Client with Timeout, Cache-First TTL, CORS Fallbacks, and Source Health Tracking
+ * Resilient API Client with Timeout, Cache-First TTL, Vercel Serverless Proxy, and CORS Fallbacks
  */
 
 import { apiCacheStore } from '../utils/storageUtils.js';
 
-const DEFAULT_TIMEOUT_MS = 8000;
+const DEFAULT_TIMEOUT_MS = 9000;
 
-// Free public CORS proxies for browser environments when direct RSS/APIs are restricted
+// Free public CORS proxies for browser environments as backup
 const CORS_PROXIES = [
+  (url) => `/api/proxy?url=${encodeURIComponent(url)}`,
   (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
   (url) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`
 ];
 
 /**
- * Universal fetch with timeout, cache, and optional CORS proxy failover
+ * Universal safe fetch
  */
 export async function safeFetch(url, options = {}) {
   const {
@@ -21,11 +22,11 @@ export async function safeFetch(url, options = {}) {
     ttlMs,
     timeoutMs = DEFAULT_TIMEOUT_MS,
     headers = {},
-    enableCorsProxyFallback = false,
+    enableCorsProxyFallback = true,
     responseType = 'json' // 'json' | 'text'
   } = options;
 
-  // 1. Check local storage cache if cacheKey provided
+  // 1. Check local storage cache
   if (cacheKey) {
     const cached = apiCacheStore.get(cacheKey);
     if (cached) {
@@ -33,10 +34,17 @@ export async function safeFetch(url, options = {}) {
     }
   }
 
-  const defaultHeaders = {
-    'Accept': responseType === 'json' ? 'application/json' : 'application/xml, text/xml, */*',
-    ...headers
+  // Filter out forbidden browser headers like 'User-Agent' in browser context
+  const safeHeaders = {
+    'Accept': responseType === 'json' ? 'application/json' : 'application/xml, text/xml, */*'
   };
+
+  if (typeof window === 'undefined') {
+    // In Node.js environment only
+    if (headers['User-Agent']) {
+      safeHeaders['User-Agent'] = headers['User-Agent'];
+    }
+  }
 
   const attemptFetch = async (targetUrl) => {
     const controller = new AbortController();
@@ -44,18 +52,29 @@ export async function safeFetch(url, options = {}) {
 
     try {
       const response = await fetch(targetUrl, {
-        headers: defaultHeaders,
+        headers: safeHeaders,
         signal: controller.signal
       });
 
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status} ${response.statusText}`);
+        throw new Error(`HTTP ${response.status}`);
       }
 
-      const data = responseType === 'json' ? await response.json() : await response.text();
-      return { data, error: null };
+      const text = await response.text();
+      let parsedData;
+      if (responseType === 'json') {
+        try {
+          parsedData = JSON.parse(text);
+        } catch {
+          throw new Error('Invalid JSON response');
+        }
+      } else {
+        parsedData = text;
+      }
+
+      return { data: parsedData, error: null };
     } catch (err) {
       clearTimeout(timeoutId);
       const isTimeout = err.name === 'AbortError';
@@ -69,26 +88,25 @@ export async function safeFetch(url, options = {}) {
   // 2. Direct fetch attempt
   let result = await attemptFetch(url);
 
-  // 3. Fallback via CORS proxy if direct failed and proxy is enabled (useful for browser RSS)
+  // 3. If direct fetch fails (e.g. CORS block in browser), try proxy fallbacks
   if (result.error && enableCorsProxyFallback) {
     for (const makeProxyUrl of CORS_PROXIES) {
       try {
         const proxyUrl = makeProxyUrl(url);
         result = await attemptFetch(proxyUrl);
         if (!result.error && result.data) {
-          break; // Successfully retrieved via proxy
+          break;
         }
       } catch {
-        // Continue to next proxy
+        // try next
       }
     }
   }
 
-  // 4. If successful, cache the result
+  // 4. Cache if successful
   if (cacheKey && result.data && !result.error) {
     apiCacheStore.set(cacheKey, result.data, ttlMs);
   }
 
   return { ...result, fromCache: false };
 }
-

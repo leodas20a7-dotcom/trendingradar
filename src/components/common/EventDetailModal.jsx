@@ -257,3 +257,4 @@ export default function EventDetailModal({ event, onClose, isPosted, onTogglePos
     </div>
   );
 }
+

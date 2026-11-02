@@ -63,3 +63,4 @@ export function exportToCSV(events = [], filenamePrefix = 'ConvenioMart_TrendRad
 export function exportToPDF() {
   window.print();
 }
+

@@ -17,7 +17,13 @@ import {
   History,
   CalendarClock,
   ArrowDownCircle,
-  RefreshCw
+  RefreshCw,
+  Star,
+  Music,
+  Film,
+  BookOpen,
+  Award,
+  Atom
 } from 'lucide-react';
 
 function SimpleCleanTrendRadar() {
@@ -29,6 +35,7 @@ function SimpleCleanTrendRadar() {
     recordsEvents,
     historyEvents,
     upcomingEvents,
+    tamilLegends,
     postedMap,
     markAsPosted,
     undoPosted,
@@ -41,12 +48,14 @@ function SimpleCleanTrendRadar() {
 
   const [hasStarted, setHasStarted] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('all');
+  const [selectedTamilRole, setSelectedTamilRole] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [activeModalEvent, setActiveModalEvent] = useState(null);
 
-  // Category Configuration
+  // Main Category Configurations
   const categories = [
     { id: 'all', label: 'All Highlights', icon: Sparkles, count: allEvents.length },
+    { id: 'tamil', label: '🌟 Tamil Nadu Legends', icon: Star, count: tamilLegends.length, highlight: true },
     { id: 'celebrities', label: 'Celebrities', icon: Cake, count: birthdayEvents.length },
     { id: 'records', label: 'Records', icon: Trophy, count: recordsEvents.length },
     { id: 'festivals', label: 'Festivals', icon: CalendarDays, count: festivalEvents.length },
@@ -55,9 +64,22 @@ function SimpleCleanTrendRadar() {
     { id: 'upcoming', label: 'Upcoming', icon: CalendarClock, count: upcomingEvents.length }
   ];
 
+  // Tamil Nadu Role Filters
+  const tamilRoles = [
+    { id: 'all', label: 'All Tamil Legends' },
+    { id: 'Poets & Writers', label: 'Poets & Writers (புலவர்கள்)' },
+    { id: 'Singers & Musicians', label: 'Singers & Music (பாடகர்/இசை)' },
+    { id: 'Actors & Filmmakers', label: 'Actors & Cinema (நடிகர்கள்)' },
+    { id: 'Statesmen & Reformers', label: 'Leaders & Reformers (தலைவர்கள்)' },
+    { id: 'Scientists & Visionaries', label: 'Scientists (விஞ்ஞானிகள்)' }
+  ];
+
   // Resolve events list based on category
   const getCategoryEvents = () => {
     switch (selectedCategory) {
+      case 'tamil':
+        if (selectedTamilRole === 'all') return tamilLegends;
+        return tamilLegends.filter(l => l.subRole === selectedTamilRole);
       case 'celebrities':
         return birthdayEvents;
       case 'records':
@@ -72,12 +94,12 @@ function SimpleCleanTrendRadar() {
         return upcomingEvents;
       case 'all':
       default:
-        // Top curated highlights across all categories
         return [
           ...festivalEvents,
           ...recordsEvents,
-          ...birthdayEvents.slice(0, 8),
-          ...newsEvents.slice(0, 8)
+          ...birthdayEvents.slice(0, 10),
+          ...newsEvents.slice(0, 8),
+          ...tamilLegends.slice(0, 8)
         ];
     }
   };
@@ -92,7 +114,8 @@ function SimpleCleanTrendRadar() {
       (item.title || '') + ' ' +
       (item.summary || '') + ' ' +
       (item.personOrTeam || '') + ' ' +
-      (item.country || '')
+      (item.country || '') + ' ' +
+      (item.tamilTitle || '')
     ).toLowerCase();
     return searchCorpus.includes(q);
   });
@@ -107,7 +130,7 @@ function SimpleCleanTrendRadar() {
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: '#F8FAFC' }}>
-      {/* Ultra Clean Top Header */}
+      {/* Top Header */}
       <header className="no-print" style={{
         background: '#FFFFFF',
         borderBottom: '1px solid #E2E8F0',
@@ -260,8 +283,8 @@ function SimpleCleanTrendRadar() {
               ConvenioMart TrendRadar
             </h2>
 
-            <p style={{ fontSize: '1rem', color: '#64748B', maxWidth: '480px', marginBottom: '2rem', lineHeight: 1.5 }}>
-              Discover today's records, legendary birthdays, festivals, and trending opportunities ready for marketing campaigns.
+            <p style={{ fontSize: '1rem', color: '#64748B', maxWidth: '520px', marginBottom: '2rem', lineHeight: 1.5 }}>
+              Track Tamil Nadu legends (poets, singers, actors), world celebrity birthdays, records broken, and festivals.
             </p>
 
             {/* The Big Clean Button */}
@@ -305,7 +328,7 @@ function SimpleCleanTrendRadar() {
               justifyContent: 'space-between',
               flexWrap: 'wrap',
               gap: '1rem',
-              marginBottom: '1.5rem'
+              marginBottom: '1rem'
             }}>
               {/* Category Options Buttons */}
               <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -316,8 +339,16 @@ function SimpleCleanTrendRadar() {
                   return (
                     <button
                       key={c.id}
-                      onClick={() => setSelectedCategory(c.id)}
+                      onClick={() => {
+                        setSelectedCategory(c.id);
+                        if (c.id !== 'tamil') setSelectedTamilRole('all');
+                      }}
                       className={`category-pill ${isActive ? 'active' : ''}`}
+                      style={{
+                        borderColor: c.highlight && !isActive ? '#DDD6FE' : undefined,
+                        background: c.highlight && !isActive ? '#F5F3FF' : undefined,
+                        color: c.highlight && !isActive ? 'var(--cm-purple)' : undefined
+                      }}
                     >
                       <Icon size={15} color={isActive ? '#FFFFFF' : 'var(--cm-purple)'} />
                       <span>{c.label}</span>
@@ -345,7 +376,7 @@ function SimpleCleanTrendRadar() {
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Quick filter..."
+                  placeholder="Search Tamil poet, actor, record..."
                   style={{
                     width: '100%',
                     padding: '0.45rem 1rem 0.45rem 2.2rem',
@@ -359,6 +390,52 @@ function SimpleCleanTrendRadar() {
               </div>
             </div>
 
+            {/* Sub-heading for Tamil Nadu Legends */}
+            {selectedCategory === 'tamil' && (
+              <div style={{
+                background: '#FFFFFF',
+                borderRadius: '12px',
+                border: '1px solid #E2E8F0',
+                padding: '1rem 1.25rem',
+                marginBottom: '1.25rem',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <Star size={17} color="#F59E0B" fill="#F59E0B" />
+                    <h3 style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--cm-navy)' }}>
+                      Tamil Nadu Legends Directory (தமிழ்நாடு சாதனையாளர்கள்)
+                    </h3>
+                  </div>
+                  <span style={{ fontSize: '0.75rem', color: '#64748B' }}>
+                    Curated authentic registry: Poets, Singers, Cinema Icons, Leaders & Scientists
+                  </span>
+                </div>
+
+                {/* Role Filter Chips */}
+                <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                  {tamilRoles.map(r => (
+                    <button
+                      key={r.id}
+                      onClick={() => setSelectedTamilRole(r.id)}
+                      style={{
+                        padding: '0.3rem 0.75rem',
+                        borderRadius: '9999px',
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        background: selectedTamilRole === r.id ? 'var(--cm-purple)' : '#F1F5F9',
+                        color: selectedTamilRole === r.id ? '#FFFFFF' : '#475569',
+                        border: `1px solid ${selectedTamilRole === r.id ? 'var(--cm-purple)' : '#E2E8F0'}`,
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      {r.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Results Counter Sub-header */}
             <div style={{
               display: 'flex',
@@ -369,7 +446,7 @@ function SimpleCleanTrendRadar() {
               color: '#64748B'
             }}>
               <span>
-                Showing <strong>{filteredEvents.length}</strong> {selectedCategory} events — Tap any card for 1-line detail & copy options
+                Showing <strong>{filteredEvents.length}</strong> events — Tap any card to open 1-line details & copy options
               </span>
             </div>
 

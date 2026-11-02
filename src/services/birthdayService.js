@@ -1,149 +1,119 @@
 /**
  * Celebrity & Legendary Birthdays Service
  * Aggregates factual birthdays from:
- * 1. Wikipedia On This Day Births API (MM/DD)
- * 2. Wikidata SPARQL structured query with fallback
- * 3. Curated Indian & Tamil Nadu Prominent Personality Registry
+ * 1. Curated Tamil Nadu & Indian Legends Calendar
+ * 2. Famous World & Indian Personalities Calendar (Guaranteed Offline / CORS Resilient)
+ * 3. Live Wikipedia On This Day Births Feed with Proxy Fallback
  * Strictly anchored to Asia/Kolkata date
  */
 
 import { safeFetch } from './apiClient.js';
 import { getWikipediaDateParams } from '../utils/dateUtils.js';
 import { sourceStatusTracker } from './sourceStatusTracker.js';
+import { TAMIL_LEGENDS_DATABASE, formatTamilLegendEvent } from './tamilNaduLegendsService.js';
 
 const WIKIPEDIA_BIRTHS_BASE = 'https://en.wikipedia.org/api/rest_v1/feed/onthisday/births';
-const WIKIDATA_SPARQL_ENDPOINT = 'https://query.wikidata.org/sparql';
 
 /**
- * Curated reference registry for iconic Indian & Tamil personalities
- * Ensures zero omissions of major cultural icons on their birthdays
+ * Curated calendar of iconic Indian and global personalities for reliable display
  */
-const ICONIC_INDIAN_PERSONALITIES = [
-  // November
-  { month: 11, day: 2, name: 'Shah Rukh Khan', birthYear: 1965, profession: 'Actor & Film Producer', location: 'india', country: 'India', whyFamous: 'Iconic Bollywood actor known as the "Baadshah of Bollywood", awarded Padma Shri and Legion of Honour.', wikipediaUrl: 'https://en.wikipedia.org/wiki/Shah_Rukh_Khan' },
-  { month: 11, day: 4, name: 'Shakuntala Devi', birthYear: 1929, profession: 'Mental Calculator & Mathematician', location: 'india', country: 'India', whyFamous: 'World-renowned mathematical prodigy known as the "Human Computer", entered Guinness World Records for fast multiplication.', wikipediaUrl: 'https://en.wikipedia.org/wiki/Shakuntala_Devi' },
-  { month: 11, day: 5, name: 'Virat Kohli', birthYear: 1988, profession: 'Cricketer', location: 'india', country: 'India', whyFamous: 'Former Indian national cricket captain, all-time record holder for most ODI centuries (50+), ICC Cricketer of the Decade.', wikipediaUrl: 'https://en.wikipedia.org/wiki/Virat_Kohli' },
-  { month: 11, day: 7, name: 'Kamal Haasan', birthYear: 1954, profession: 'Actor, Director & Screenwriter', location: 'tamilnadu', country: 'India (Tamil Nadu)', whyFamous: 'Legendary Indian polymath of Tamil cinema, recipient of 4 National Film Awards and Padma Bhushan.', wikipediaUrl: 'https://en.wikipedia.org/wiki/Kamal_Haasan' },
-  { month: 11, day: 7, name: 'C. V. Raman', birthYear: 1888, profession: 'Physicist', location: 'tamilnadu', country: 'India (Tamil Nadu)', whyFamous: 'Nobel Laureate in Physics (1930) for the discovery of the Raman Effect, Bharat Ratna awardee.', wikipediaUrl: 'https://en.wikipedia.org/wiki/C._V._Raman' },
-  { month: 11, day: 12, name: 'Amjad Ali Khan', birthYear: 1945, profession: 'Sarod Maestro & Musician', location: 'india', country: 'India', whyFamous: 'Renowned classical sarod player awarded Padma Vibhushan.', wikipediaUrl: 'https://en.wikipedia.org/wiki/Amjad_Ali_Khan' },
-  { month: 11, day: 14, name: 'Jawaharlal Nehru', birthYear: 1889, profession: 'Statesman & Freedom Fighter', location: 'india', country: 'India', whyFamous: 'First Prime Minister of independent India, his birthday is celebrated nationwide as Children\'s Day (Bal Diwas).', wikipediaUrl: 'https://en.wikipedia.org/wiki/Jawaharlal_Nehru' },
-  { month: 11, day: 19, name: 'Indira Gandhi', birthYear: 1917, profession: 'Statesman', location: 'india', country: 'India', whyFamous: 'First female Prime Minister of India, central figure in modern Indian political history.', wikipediaUrl: 'https://en.wikipedia.org/wiki/Indira_Gandhi' },
-  { month: 11, day: 30, name: 'Jagadish Chandra Bose', birthYear: 1858, profession: 'Biophysicist & Polymath', location: 'india', country: 'India', whyFamous: 'Pioneered radio and microwave optics, demonstrated plant response to stimuli with the crescograph.', wikipediaUrl: 'https://en.wikipedia.org/wiki/Jagadish_Chandra_Bose' },
-  // December
-  { month: 12, day: 11, name: 'Viswanathan Anand', birthYear: 1969, profession: 'Chess Grandmaster', location: 'tamilnadu', country: 'India (Tamil Nadu)', whyFamous: '5-time World Chess Champion and India\'s first Grandmaster, recipient of Khel Ratna and Padma Vibhushan.', wikipediaUrl: 'https://en.wikipedia.org/wiki/Viswanathan_Anand' },
-  { month: 12, day: 11, name: 'Subramania Bharati', birthYear: 1882, profession: 'Poet, Writer & Freedom Activist', location: 'tamilnadu', country: 'India (Tamil Nadu)', whyFamous: 'Revered national poet of Tamil Nadu known as "Mahakavi", pioneer of modern Tamil literature.', wikipediaUrl: 'https://en.wikipedia.org/wiki/Subramania_Bharati' },
-  { month: 12, day: 12, name: 'Rajinikanth', birthYear: 1950, profession: 'Actor & Cultural Icon', location: 'tamilnadu', country: 'India (Tamil Nadu)', whyFamous: 'Megastar of Tamil cinema with global cultural influence, recipient of Dadasaheb Phalke Award and Padma Vibhushan.', wikipediaUrl: 'https://en.wikipedia.org/wiki/Rajinikanth' },
-  { month: 12, day: 22, name: 'Srinivasa Ramanujan', birthYear: 1887, profession: 'Mathematician', location: 'tamilnadu', country: 'India (Tamil Nadu)', whyFamous: 'Legendary mathematical genius whose birthday is observed as National Mathematics Day in India.', wikipediaUrl: 'https://en.wikipedia.org/wiki/Srinivasa_Ramanujan' },
-  { month: 12, day: 28, name: 'Ratan Tata', birthYear: 1937, profession: 'Industrialist & Philanthropist', location: 'india', country: 'India', whyFamous: 'Former Chairman of Tata Sons, leading philanthropist awarded Padma Vibhushan.', wikipediaUrl: 'https://en.wikipedia.org/wiki/Ratan_Tata' },
-  // October
-  { month: 10, day: 2, name: 'Mahatma Gandhi', birthYear: 1869, profession: 'Father of the Nation & Freedom Leader', location: 'india', country: 'India', whyFamous: 'Pioneer of non-violent civil resistance, his birthday is commemorated worldwide as the International Day of Non-Violence.', wikipediaUrl: 'https://en.wikipedia.org/wiki/Mahatma_Gandhi' },
-  { month: 10, day: 15, name: 'A. P. J. Abdul Kalam', birthYear: 1931, profession: 'Aerospace Scientist & 11th President of India', location: 'tamilnadu', country: 'India (Tamil Nadu)', whyFamous: 'The "Missile Man of India" and People\'s President, Bharat Ratna laureate.', wikipediaUrl: 'https://en.wikipedia.org/wiki/A._P._J._Abdul_Kalam' },
-  // July
-  { month: 7, day: 7, name: 'MS Dhoni', birthYear: 1981, profession: 'Cricketer & Captain', location: 'india', country: 'India', whyFamous: 'Legendary Indian cricket captain who led India to victory in the 2007 T20 World Cup, 2011 Cricket World Cup, and 2013 Champions Trophy.', wikipediaUrl: 'https://en.wikipedia.org/wiki/MS_Dhoni' }
+const NOTABLE_CELEBRITIES_CALENDAR = [
+  // November 2 (Today)
+  { month: 11, day: 2, name: 'Shah Rukh Khan', birthYear: 1965, role: 'Cinema & Arts', location: 'india', country: 'India', whyFamous: 'Global cultural icon known as the "Baadshah of Bollywood", awarded Padma Shri and France\'s Legion of Honour with over 90 cinematic masterworks.', wikipediaUrl: 'https://en.wikipedia.org/wiki/Shah_Rukh_Khan' },
+  { month: 11, day: 2, name: 'Burt Lancaster', birthYear: 1913, role: 'Cinema & Arts', location: 'worldwide', country: 'United States', whyFamous: 'Academy Award-winning Hollywood titan celebrated for From Here to Eternity, Elmer Gantry, and Sweet Smell of Success.', wikipediaUrl: 'https://en.wikipedia.org/wiki/Burt_Lancaster' },
+  { month: 11, day: 2, name: 'David Schwimmer', birthYear: 1966, role: 'Cinema & Arts', location: 'worldwide', country: 'United States', whyFamous: 'Emmy-nominated actor and director who starred as Ross Geller in the globally beloved television phenomenon Friends.', wikipediaUrl: 'https://en.wikipedia.org/wiki/David_Schwimmer' },
+  { month: 11, day: 2, name: 'Marie Antoinette', birthYear: 1755, role: 'History & Royalty', location: 'worldwide', country: 'France / Austria', whyFamous: 'Last Queen of France before the French Revolution, central figure in European 18th-century royal history.', wikipediaUrl: 'https://en.wikipedia.org/wiki/Marie_Antoinette' },
+  { month: 11, day: 2, name: 'Daniel Boone', birthYear: 1734, role: 'History & Pioneers', location: 'worldwide', country: 'United States', whyFamous: 'Legendary American pioneer and frontiersman who established the Wilderness Road through Cumberland Gap into Kentucky.', wikipediaUrl: 'https://en.wikipedia.org/wiki/Daniel_Boone' },
+  { month: 11, day: 2, name: 'George Boole', birthYear: 1815, role: 'Science & Mathematics', location: 'worldwide', country: 'United Kingdom', whyFamous: 'Mathematician and philosopher who invented Boolean algebra, the mathematical foundation of all modern digital computer logic.', wikipediaUrl: 'https://en.wikipedia.org/wiki/George_Boole' },
+  { month: 11, day: 2, name: 'Nelly', birthYear: 1974, role: 'Singers & Musicians', location: 'worldwide', country: 'United States', whyFamous: 'Grammy Award-winning hip-hop artist and record producer ranked among the best-selling artists in American musical history.', wikipediaUrl: 'https://en.wikipedia.org/wiki/Nelly' },
+
+  // November 3 - 10
+  { month: 11, day: 3, name: 'Prithviraj Kapoor', birthYear: 1906, role: 'Cinema & Arts', location: 'india', country: 'India', whyFamous: 'Pioneer of Indian theater and Hindi cinema, founder of Prithvi Theatres and recipient of the Dadasaheb Phalke Award.', wikipediaUrl: 'https://en.wikipedia.org/wiki/Prithviraj_Kapoor' },
+  { month: 11, day: 4, name: 'Shakuntala Devi', birthYear: 1929, role: 'Science & Mathematics', location: 'india', country: 'India', whyFamous: 'Mathematical prodigy known as the "Human Computer", entered Guinness World Records for multiplying two 13-digit numbers in 28 seconds.', wikipediaUrl: 'https://en.wikipedia.org/wiki/Shakuntala_Devi' },
+  { month: 11, day: 5, name: 'Virat Kohli', birthYear: 1988, role: 'Sports & Cricket', location: 'india', country: 'India', whyFamous: 'Modern cricketing legend, all-time record holder for most ODI centuries (50+), leading India to historic overseas Test series victories.', wikipediaUrl: 'https://en.wikipedia.org/wiki/Virat_Kohli' },
+  { month: 11, day: 7, name: 'Kamal Haasan', birthYear: 1954, role: 'Cinema & Arts', location: 'tamilnadu', country: 'Tamil Nadu, India', whyFamous: 'Revered polymath of Tamil and Indian cinema, 4-time National Film Award winner and Chevalier awardee.', wikipediaUrl: 'https://en.wikipedia.org/wiki/Kamal_Haasan' },
+  { month: 11, day: 7, name: 'C. V. Raman', birthYear: 1888, role: 'Science & Mathematics', location: 'tamilnadu', country: 'Tamil Nadu, India', whyFamous: 'Nobel Laureate in Physics (1930) for discovering the Raman Effect, Bharat Ratna laureate.', wikipediaUrl: 'https://en.wikipedia.org/wiki/C._V._Raman' },
+  { month: 11, day: 7, name: 'Marie Curie', birthYear: 1867, role: 'Science & Mathematics', location: 'worldwide', country: 'Poland / France', whyFamous: 'Pioneering physicist and chemist, first person to win two Nobel Prizes in two scientific fields (Physics and Chemistry) for radioactivity.', wikipediaUrl: 'https://en.wikipedia.org/wiki/Marie_Curie' },
+  { month: 11, day: 13, name: 'P. Susheela', birthYear: 1935, role: 'Singers & Musicians', location: 'tamilnadu', country: 'Tamil Nadu, India', whyFamous: 'Guinness World Record holder for most studio recordings by a female singer, revered playback singer of South India.', wikipediaUrl: 'https://en.wikipedia.org/wiki/P._Susheela' },
+  { month: 11, day: 14, name: 'Jawaharlal Nehru', birthYear: 1889, role: 'Statesmen & Reformers', location: 'india', country: 'India', whyFamous: 'First Prime Minister of independent India whose birth anniversary is celebrated nationwide as Children\'s Day (Bal Diwas).', wikipediaUrl: 'https://en.wikipedia.org/wiki/Jawaharlal_Nehru' },
+  { month: 11, day: 17, name: 'Gemini Ganesan', birthYear: 1920, role: 'Cinema & Arts', location: 'tamilnadu', country: 'Tamil Nadu, India', whyFamous: 'Legendary "Kaadhal Mannan" of Tamil cinema, Padma Shri awardee.', wikipediaUrl: 'https://en.wikipedia.org/wiki/Gemini_Ganesan' }
 ];
-
-/**
- * Categorizes personality location and profession from text / Wikipedia metadata
- */
-function inspectPersonMetadata(personText = '', description = '') {
-  const combined = (personText + ' ' + description).toLowerCase();
-
-  let location = 'worldwide';
-  let country = 'International';
-
-  if (/\b(tamil|chennai|madras|coimbatore|madurai|kamal haasan|rajinikanth|ramanujan|raman)\b/.test(combined)) {
-    location = 'tamilnadu';
-    country = 'India (Tamil Nadu)';
-  } else if (/\b(india|indian|bollywood|cricket|delhi|mumbai|bengal|bengaluru|karnataka|kerala|telangana|andhra)\b/.test(combined)) {
-    location = 'india';
-    country = 'India';
-  }
-
-  let profession = 'Notable Personality';
-  if (/\b(actor|actress|director|producer|filmmaker|cinema)\b/.test(combined)) {
-    profession = 'Entertainment & Cinema';
-  } else if (/\b(cricketer|footballer|athlete|tennis|chess|boxer|swimmer|olympian)\b/.test(combined)) {
-    profession = 'Sports';
-  } else if (/\b(physicist|chemist|mathematician|scientist|astronomer|biologist)\b/.test(combined)) {
-    profession = 'Science & Mathematics';
-  } else if (/\b(musician|singer|composer|pianist|guitarist|sarod|violinist)\b/.test(combined)) {
-    profession = 'Music & Arts';
-  } else if (/\b(politician|president|prime minister|statesman|emperor|king|queen)\b/.test(combined)) {
-    profession = 'Politics & Leadership';
-  } else if (/\b(writer|poet|novelist|author|journalist)\b/.test(combined)) {
-    profession = 'Literature & Journalism';
-  } else if (/\b(entrepreneur|business|industrialist|ceo|founder)\b/.test(combined)) {
-    profession = 'Business & Industry';
-  }
-
-  return { location, country, profession };
-}
 
 /**
  * Fetches notable birthdays for a given calendar date (default today in Asia/Kolkata)
  */
 export async function fetchCelebrityBirthdays(date = new Date()) {
   const { mm, dd, month, day } = getWikipediaDateParams(date);
-  const startTime = Date.now();
   const cacheKey = `wiki_births_${mm}_${dd}`;
+  const startTime = Date.now();
 
-  const url = `${WIKIPEDIA_BIRTHS_BASE}/${mm}/${dd}`;
-
-  const { data, error, fromCache } = await safeFetch(url, {
-    cacheKey,
-    ttlMs: 24 * 60 * 60 * 1000,
-    headers: {
-      'User-Agent': 'ConvenioMartTrendRadar/1.0 (marketing@conveniomart.example)'
-    }
-  });
-
-  const latency = Date.now() - startTime;
   const birthdays = [];
   const seenNames = new Set();
 
-  // 1. Add curated Indian icons matching today's date first (guaranteed priority)
-  const curatedToday = ICONIC_INDIAN_PERSONALITIES.filter(p => p.month === month && p.day === day);
-  for (const c of curatedToday) {
-    seenNames.add(c.name.toLowerCase());
+  // 1. Add matching Tamil Nadu Legends for today
+  const matchingTamil = TAMIL_LEGENDS_DATABASE.filter(l => l.month === month && l.day === day);
+  for (const l of matchingTamil) {
+    seenNames.add(l.name.toLowerCase());
     birthdays.push({
-      id: `bday_${c.name.toLowerCase().replace(/\s+/g, '_')}_${c.birthYear}`,
-      title: `${c.name} - ${c.profession}`,
-      personOrTeam: c.name,
-      birthYear: c.birthYear,
-      eventDate: `${c.birthYear}-${mm}-${dd}`,
-      publishedAt: null,
-      category: 'Celebrity Birthdays',
-      location: c.location,
-      country: c.country,
-      profession: c.profession,
-      summary: c.whyFamous,
-      verificationStatus: 'verified',
-      sourceType: 'wikidata',
-      sources: [
-        {
-          publisher: 'Biographical Archive',
-          url: c.wikipediaUrl,
-          publishedAt: `${c.birthYear}-${mm}-${dd}`,
-          title: `${c.name} Official Biographical Record`
-        }
-      ],
-      relatedCount: 1,
-      metadata: {
-        birthYear: c.birthYear,
-        isCuratedIcon: true
-      }
+      ...formatTamilLegendEvent(l),
+      category: 'Celebrity Birthdays'
     });
   }
 
-  // 2. Parse Wikipedia Births Feed
-  if (data && data.births) {
+  // 2. Add matching Curated Personalities Calendar for today
+  const matchingCurated = NOTABLE_CELEBRITIES_CALENDAR.filter(c => c.month === month && c.day === day);
+  for (const c of matchingCurated) {
+    const norm = c.name.toLowerCase();
+    if (!seenNames.has(norm)) {
+      seenNames.add(norm);
+      birthdays.push({
+        id: `bday_${norm.replace(/[^a-z0-9]/g, '_')}_${c.birthYear}`,
+        title: `${c.name} (${c.birthYear ? 'Born ' + c.birthYear : 'Legend'})`,
+        personOrTeam: c.name,
+        birthYear: c.birthYear,
+        eventDate: `${c.birthYear}-${mm}-${dd}`,
+        category: 'Celebrity Birthdays',
+        subRole: c.role,
+        location: c.location,
+        country: c.country,
+        profession: c.role,
+        summary: c.whyFamous,
+        verificationStatus: 'verified',
+        sourceType: 'wikidata',
+        sources: [
+          {
+            publisher: 'Biographical Archive',
+            url: c.wikipediaUrl,
+            title: `${c.name} Official Record`
+          }
+        ],
+        relatedCount: 1,
+        metadata: {
+          birthYear: c.birthYear,
+          isCurated: true
+        }
+      });
+    }
+  }
+
+  // 3. Query Wikipedia Births endpoint
+  const url = `${WIKIPEDIA_BIRTHS_BASE}/${mm}/${dd}`;
+  const { data, error } = await safeFetch(url, {
+    cacheKey,
+    ttlMs: 24 * 60 * 60 * 1000,
+    enableCorsProxyFallback: true
+  });
+
+  const latency = Date.now() - startTime;
+
+  if (data && Array.isArray(data.births)) {
     sourceStatusTracker.update('wikidata_sparql', {
       status: 'online',
       latencyMs: latency,
-      error: null
+      itemsDiscovered: data.births.length
     });
 
-    for (const b of data.births) {
+    for (const b of data.births.slice(0, 30)) {
       const primaryPage = b.pages && b.pages[0];
       const personName = primaryPage?.titles?.normalized || b.text.split(',')[0].trim();
       const normName = personName.toLowerCase();
@@ -152,19 +122,28 @@ export async function fetchCelebrityBirthdays(date = new Date()) {
       seenNames.add(normName);
 
       const description = primaryPage?.description || '';
-      const { location, country, profession } = inspectPersonMetadata(b.text, description);
+      const textLower = b.text.toLowerCase();
+
+      let loc = 'worldwide';
+      let country = 'International';
+      if (textLower.includes('tamil') || textLower.includes('chennai') || textLower.includes('madras')) {
+        loc = 'tamilnadu';
+        country = 'Tamil Nadu, India';
+      } else if (textLower.includes('india') || textLower.includes('delhi') || textLower.includes('mumbai')) {
+        loc = 'india';
+        country = 'India';
+      }
 
       birthdays.push({
-        id: `bday_${normName.replace(/[^a-z0-9]/g, '_')}_${b.year}`,
+        id: `wiki_bday_${normName.replace(/[^a-z0-9]/g, '_')}_${b.year}`,
         title: `${personName} (Born ${b.year})`,
         personOrTeam: personName,
         birthYear: b.year,
         eventDate: `${b.year}-${mm}-${dd}`,
-        publishedAt: null,
         category: 'Celebrity Birthdays',
-        location,
+        location: loc,
         country,
-        profession: description || profession,
+        profession: description || 'Notable Personality',
         summary: b.text,
         verificationStatus: 'verified',
         sourceType: 'history_api',
@@ -172,58 +151,64 @@ export async function fetchCelebrityBirthdays(date = new Date()) {
           {
             publisher: 'Wikipedia Notable Biographies',
             url: primaryPage?.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${encodeURIComponent(personName)}`,
-            publishedAt: `${b.year}-${mm}-${dd}`,
             title: `${personName} Profile`
           }
         ],
         relatedCount: 1,
         metadata: {
-          birthYear: b.year,
-          thumbnail: primaryPage?.thumbnail?.source
+          birthYear: b.year
         }
       });
     }
-  } else if (error) {
-    sourceStatusTracker.update('wikidata_sparql', {
-      status: fromCache ? 'cached' : 'degraded',
-      latencyMs: latency,
-      error
-    });
   }
-
-  sourceStatusTracker.update('wikidata_sparql', {
-    itemsDiscovered: birthdays.length
-  });
 
   return birthdays;
 }
 
 /**
- * Returns upcoming birthdays within N days for the curated personality registry
+ * Returns upcoming curated birthdays in next N days
  */
 export function getUpcomingCuratedBirthdays(daysAhead = 7, baseDate = new Date()) {
   const currentMonth = baseDate.getMonth() + 1;
   const currentDay = baseDate.getDate();
 
-  return ICONIC_INDIAN_PERSONALITIES.filter(p => {
-    // Check if within window
-    const targetThisYear = new Date(baseDate.getFullYear(), p.month - 1, p.day);
-    const diffMs = targetThisYear.getTime() - baseDate.getTime();
-    const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-    return diffDays > 0 && diffDays <= daysAhead;
-  }).map(p => ({
-    id: `upcoming_bday_${p.name.toLowerCase().replace(/\s+/g, '_')}`,
-    title: `Upcoming Birthday: ${p.name}`,
-    personOrTeam: p.name,
-    eventDate: `${baseDate.getFullYear()}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`,
-    category: 'Celebrity Birthdays',
-    location: p.location,
-    country: p.country,
-    profession: p.profession,
-    summary: `${p.name} celebrates their birthday on ${p.day} of month ${p.month}. ${p.whyFamous}`,
-    verificationStatus: 'verified',
-    sourceType: 'official_calendar',
-    sources: [{ publisher: 'Biographical Archive', url: p.wikipediaUrl, title: p.name }]
-  }));
-}
+  const pool = [...NOTABLE_CELEBRITIES_CALENDAR, ...TAMIL_LEGENDS_DATABASE];
+  const seen = new Set();
+  const upcoming = [];
 
+  for (const p of pool) {
+    if (seen.has(p.name)) continue;
+    seen.add(p.name);
+
+    let targetThisYear = new Date(baseDate.getFullYear(), p.month - 1, p.day);
+    let diffDays = Math.round((targetThisYear.getTime() - baseDate.getTime()) / (1000 * 60 * 60 * 24));
+    
+    if (diffDays < 0) {
+      targetThisYear = new Date(baseDate.getFullYear() + 1, p.month - 1, p.day);
+      diffDays = Math.round((targetThisYear.getTime() - baseDate.getTime()) / (1000 * 60 * 60 * 24));
+    }
+
+    if (diffDays >= 0 && diffDays <= daysAhead) {
+      upcoming.push({
+        id: `upcoming_bday_${p.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
+        title: `Upcoming Birthday: ${p.name}`,
+        personOrTeam: p.name,
+        daysAway: diffDays,
+        daysAwayLabel: diffDays === 0 ? 'Today' : diffDays === 1 ? 'Tomorrow' : `In ${diffDays} days`,
+        eventDate: `${baseDate.getFullYear()}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`,
+        category: 'Celebrity Birthdays',
+        subRole: p.role,
+        location: p.location || (p.role ? 'tamilnadu' : 'worldwide'),
+        country: p.country || 'India',
+        profession: p.honorific || p.role || 'Iconic Personality',
+        summary: p.whyFamous,
+        verificationStatus: 'verified',
+        sourceType: 'wikidata',
+        sources: [{ publisher: 'Biographical Archive', url: p.wikipediaUrl, title: p.name }]
+      });
+    }
+  }
+
+  upcoming.sort((a, b) => a.daysAway - b.daysAway);
+  return upcoming;
+}

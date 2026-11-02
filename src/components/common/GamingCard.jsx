@@ -98,3 +98,4 @@ export default function GamingCard({ event, onClick, isPosted, isSaved }) {
     </div>
   );
 }
+
